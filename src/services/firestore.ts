@@ -144,7 +144,7 @@ export const updateMVPDocument = async (docId: string, updates: Partial<MVPDocum
   }
 };
 
-// Real-time Investor Services
+// Real-time Investor Services - Fixed to avoid composite index requirements
 export const subscribeToInvestors = (
   callback: (investors: Investor[]) => void,
   filters?: {
@@ -155,26 +155,20 @@ export const subscribeToInvestors = (
   }
 ): Unsubscribe => {
   try {
+    // Simplified query to avoid composite index requirements
+    // We'll filter by role only and do client-side filtering for other criteria
     let q = query(
       collection(db, 'users'),
-      where('role', '==', 'investor'),
-      orderBy('createdAt', 'desc')
+      where('role', '==', 'investor')
     );
     
-    if (filters?.stage && filters.stage !== 'All') {
-      q = query(q, where('stage', '==', filters.stage));
-    }
-    
-    if (filters?.activelyInvesting !== undefined) {
-      q = query(q, where('activelyInvesting', '==', filters.activelyInvesting));
-    }
-    
+    // Apply limit if specified
     if (filters?.limit) {
-      q = query(q, limit(filters.limit));
+      q = query(q, limit(filters.limit * 2)); // Get more to account for client-side filtering
     }
     
     return onSnapshot(q, (querySnapshot) => {
-      const investors: Investor[] = querySnapshot.docs.map(doc => {
+      let investors: Investor[] = querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -187,10 +181,39 @@ export const subscribeToInvestors = (
           location: data.location || '',
           website: data.website || '',
           activelyInvesting: data.activelyInvesting || false,
-          matchScore: calculateMatchScore(data), // Calculate based on user data
+          matchScore: calculateMatchScore(data),
           createdAt: data.createdAt?.toDate()
         };
       });
+      
+      // Apply client-side filtering
+      if (filters?.stage && filters.stage !== 'All') {
+        investors = investors.filter(investor => investor.stage === filters.stage);
+      }
+      
+      if (filters?.activelyInvesting !== undefined) {
+        investors = investors.filter(investor => investor.activelyInvesting === filters.activelyInvesting);
+      }
+      
+      if (filters?.focus && filters.focus !== 'All') {
+        investors = investors.filter(investor => 
+          investor.focus.some(f => f.toLowerCase().includes(filters.focus!.toLowerCase()))
+        );
+      }
+      
+      // Sort by creation date (newest first) and match score
+      investors.sort((a, b) => {
+        const dateA = a.createdAt ? a.createdAt.getTime() : 0;
+        const dateB = b.createdAt ? b.createdAt.getTime() : 0;
+        if (dateB !== dateA) return dateB - dateA;
+        return b.matchScore - a.matchScore;
+      });
+      
+      // Apply final limit after filtering
+      if (filters?.limit) {
+        investors = investors.slice(0, filters.limit);
+      }
+      
       callback(investors);
     });
   } catch (error) {
