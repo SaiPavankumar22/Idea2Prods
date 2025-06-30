@@ -19,10 +19,12 @@ import {
   CheckCircle,
   FileText,
   Code,
-  Rocket
+  Rocket,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 import { Investor, Project, InvestorConnection } from '../types';
-import { getInvestors } from '../services/firestore';
+import { subscribeToInvestors, addInvestorConnection } from '../services/firestore';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -32,6 +34,7 @@ const InvestorNetwork: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStage, setSelectedStage] = useState<string>('All');
   const [selectedFocus, setSelectedFocus] = useState<string>('All');
+  const [showActiveOnly, setShowActiveOnly] = useState(true);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
   const [connectionMessage, setConnectionMessage] = useState('');
@@ -47,23 +50,20 @@ const InvestorNetwork: React.FC = () => {
   const focusAreas = ['All', 'AI/ML', 'Web3', 'DevTools', 'Mobile', 'Enterprise Software', 'Fintech'];
 
   useEffect(() => {
-    loadInvestors();
-  }, [selectedStage]);
-
-  const loadInvestors = async () => {
-    setLoading(true);
-    try {
-      const investorList = await getInvestors({
+    const unsubscribe = subscribeToInvestors(
+      (investorList) => {
+        setInvestors(investorList);
+        setLoading(false);
+      },
+      {
         stage: selectedStage !== 'All' ? selectedStage : undefined,
+        activelyInvesting: showActiveOnly ? true : undefined,
         limit: 50
-      });
-      setInvestors(investorList);
-    } catch (error) {
-      console.error('Error loading investors:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      }
+    );
+
+    return () => unsubscribe();
+  }, [selectedStage, showActiveOnly]);
 
   const handleConnectInvestor = (investor: Investor) => {
     setSelectedInvestor(investor);
@@ -110,22 +110,51 @@ Demo: ${project.demo || 'Available upon request'}`;
   };
 
   const handleSendConnection = async () => {
-    if (!selectedInvestor || !user) return;
+    if (!selectedInvestor || !user || !selectedProject) return;
 
     setConnectionStatus('sending');
 
-    // Simulate API call to send connection request
-    setTimeout(() => {
-      setConnectionStatus('sent');
+    try {
+      const connection: Omit<InvestorConnection, 'id'> = {
+        projectId: selectedProject.id,
+        investorId: selectedInvestor.id,
+        userId: user.uid,
+        status: 'pending',
+        message: connectionMessage,
+        projectData: {
+          title: selectedProject.title,
+          description: selectedProject.description,
+          techStack: selectedProject.techStack,
+          progress: selectedProject.progress,
+          mvpDocument: selectedProject.mvpDocument,
+          demo: selectedProject.demo,
+          repository: selectedProject.repository
+        },
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const connectionId = await addInvestorConnection(connection);
       
-      // Reset after showing success
-      setTimeout(() => {
-        setShowConnectionModal(false);
-        setSelectedInvestor(null);
-        setConnectionMessage('');
+      if (connectionId) {
+        setConnectionStatus('sent');
+        
+        // Reset after showing success
+        setTimeout(() => {
+          setShowConnectionModal(false);
+          setSelectedInvestor(null);
+          setConnectionMessage('');
+          setConnectionStatus('idle');
+        }, 2000);
+      } else {
         setConnectionStatus('idle');
-      }, 2000);
-    }, 1500);
+        alert('Failed to send connection request. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error sending connection:', error);
+      setConnectionStatus('idle');
+      alert('Failed to send connection request. Please try again.');
+    }
   };
 
   const filteredInvestors = investors.filter(investor => {
@@ -230,7 +259,7 @@ Demo: ${project.demo || 'Available upon request'}`;
           </div>
 
           {/* Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Investment Stage</label>
               <select
@@ -256,9 +285,28 @@ Demo: ${project.demo || 'Available upon request'}`;
                 ))}
               </select>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Investment Status</label>
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Actively Investing Only</span>
+                <button
+                  onClick={() => setShowActiveOnly(!showActiveOnly)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    showActiveOnly ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                      showActiveOnly ? 'translate-x-5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
             <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
               <Filter className="w-4 h-4" />
               <span>{filteredInvestors.length} investors match your criteria</span>
@@ -301,8 +349,15 @@ Demo: ${project.demo || 'Available upon request'}`;
                     </div>
                   </div>
                   
-                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${getMatchScoreColor(investor.matchScore)}`}>
-                    {investor.matchScore}% Match
+                  <div className="flex flex-col items-end space-y-2">
+                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${getMatchScoreColor(investor.matchScore)}`}>
+                      {investor.matchScore}% Match
+                    </div>
+                    {investor.activelyInvesting && (
+                      <div className="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 text-xs rounded-full font-medium">
+                        Active
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -359,7 +414,8 @@ Demo: ${project.demo || 'Available upon request'}`;
                 <div className="flex items-center justify-between space-x-3">
                   <motion.button
                     onClick={() => handleConnectInvestor(investor)}
-                    className="flex-1 flex items-center justify-center px-4 py-2 bg-gradient-to-r from-primary-600 to-secondary-600 text-white font-medium rounded-lg hover:shadow-lg transition-all duration-200"
+                    disabled={!selectedProject}
+                    className="flex-1 flex items-center justify-center px-4 py-2 bg-gradient-to-r from-primary-600 to-secondary-600 text-white font-medium rounded-lg hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >

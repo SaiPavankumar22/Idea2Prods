@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, User, Eye, EyeOff, Loader, Check, AlertCircle, Building, Code, TrendingUp, MapPin, DollarSign } from 'lucide-react';
+import { X, Mail, Lock, User, Eye, EyeOff, Loader, Check, AlertCircle, Building, Code, TrendingUp, MapPin, DollarSign, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -33,6 +33,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [checkSize, setCheckSize] = useState('');
   const [location, setLocation] = useState('');
   const [website, setWebsite] = useState('');
+  const [activelyInvesting, setActivelyInvesting] = useState(true);
 
   // Additional fields for developers
   const [experience, setExperience] = useState<'Beginner' | 'Intermediate' | 'Expert'>('Beginner');
@@ -139,7 +140,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     try {
       const additionalData = role === 'investor' 
-        ? { firm, focus, stage, checkSize, location, website }
+        ? { firm, focus, stage, checkSize, location, website, activelyInvesting }
         : { experience, interests };
 
       const success = await register(email, password, name, role, additionalData);
@@ -172,6 +173,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setCheckSize('');
     setLocation('');
     setWebsite('');
+    setActivelyInvesting(true);
     setExperience('Beginner');
     setInterests([]);
   };
@@ -556,6 +558,32 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
             placeholder="https://yourfirm.com"
           />
+        </div>
+
+        {/* Actively Investing Toggle */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            Investment Status
+          </label>
+          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Actively Investing</h4>
+              <p className="text-xs text-gray-600 dark:text-gray-400">Are you currently looking for new investment opportunities?</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActivelyInvesting(!activelyInvesting)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                activelyInvesting ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  activelyInvesting ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         <div>

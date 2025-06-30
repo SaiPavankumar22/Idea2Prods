@@ -106,6 +106,7 @@ export interface Investor {
   location: string;
   website: string;
   matchScore: number;
+  activelyInvesting: boolean; // New field for investment status
   createdAt?: Date;
 }
 
@@ -179,6 +180,7 @@ export interface User {
   portfolio?: string[];
   location?: string;
   website?: string;
+  activelyInvesting?: boolean; // New field for investment status
   createdAt: Date;
 }
 

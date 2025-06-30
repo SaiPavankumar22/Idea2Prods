@@ -1,4 +1,4 @@
-import { Technology, Project, Investor } from '../types';
+import { Technology, Project } from '../types';
 
 export const mockTechnologies: Technology[] = [
   {
@@ -97,6 +97,7 @@ export const mockProjects: Project[] = [
     estimatedCompletion: '2024-02-15',
     techStack: ['React', 'Node.js', 'LangChain', 'PostgreSQL'],
     repository: 'https://github.com/user/ai-content-creator',
+    userId: 'user1'
   },
   {
     id: '2',
@@ -108,44 +109,8 @@ export const mockProjects: Project[] = [
     createdAt: '2024-01-12',
     estimatedCompletion: '2024-03-01',
     techStack: ['Python', 'FastAPI', 'Stable Diffusion', 'React'],
+    userId: 'user1'
   }
 ];
 
-export const mockInvestors: Investor[] = [
-  {
-    id: '1',
-    name: 'Sarah Chen',
-    firm: 'AI Ventures',
-    focus: ['AI/ML', 'Enterprise Software', 'Developer Tools'],
-    stage: 'Seed',
-    checkSize: '$500K - $2M',
-    portfolio: ['OpenAI', 'Anthropic', 'Scale AI'],
-    location: 'San Francisco, CA',
-    website: 'https://aiventures.com',
-    matchScore: 95
-  },
-  {
-    id: '2',
-    name: 'Michael Rodriguez',
-    firm: 'Tech Forward Capital',
-    focus: ['Web3', 'Fintech', 'Infrastructure'],
-    stage: 'Pre-seed',
-    checkSize: '$100K - $500K',
-    portfolio: ['Chainlink', 'Polygon', 'Uniswap'],
-    location: 'New York, NY',
-    website: 'https://techforward.vc',
-    matchScore: 88
-  },
-  {
-    id: '3',
-    name: 'Emily Watson',
-    firm: 'Growth Labs',
-    focus: ['Mobile', 'Consumer Apps', 'Social'],
-    stage: 'Series A',
-    checkSize: '$2M - $10M',
-    portfolio: ['Instagram', 'TikTok', 'Discord'],
-    location: 'Los Angeles, CA',
-    website: 'https://growthlabs.com',
-    matchScore: 82
-  }
-];
+// Removed mockInvestors array - investors will come from real-time Firestore data

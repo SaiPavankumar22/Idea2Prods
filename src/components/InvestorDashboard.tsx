@@ -17,11 +17,13 @@ import {
   Search,
   Eye,
   Download,
-  Loader
+  Loader,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { InvestorConnection, Project } from '../types';
-import { getInvestorConnections } from '../services/firestore';
+import { InvestorConnection } from '../types';
+import { subscribeToInvestorConnections, updateInvestorConnection, createChatFromConnection } from '../services/firestore';
 import { useNavigate } from 'react-router-dom';
 
 const InvestorDashboard: React.FC = () => {
@@ -37,36 +39,33 @@ const InvestorDashboard: React.FC = () => {
 
   useEffect(() => {
     if (user) {
-      loadConnections();
+      const unsubscribe = subscribeToInvestorConnections(user.uid, (connectionList) => {
+        setConnections(connectionList);
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
     }
   }, [user]);
 
-  const loadConnections = async () => {
-    if (!user) return;
-    
-    setLoading(true);
-    try {
-      // For investors, we need to get connections where they are the target
-      // This would require a different query structure in a real implementation
-      const investorConnections = await getInvestorConnections(user.uid);
-      setConnections(investorConnections);
-    } catch (error) {
-      console.error('Error loading connections:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleConnectionAction = async (connectionId: string, action: 'accept' | 'reject', message?: string) => {
-    // In a real implementation, this would update the connection status
-    console.log(`${action} connection ${connectionId}`, message);
-    
-    // Update local state
-    setConnections(prev => prev.map(conn => 
-      conn.id === connectionId 
-        ? { ...conn, status: action === 'accept' ? 'accepted' : 'rejected', responseMessage: message }
-        : conn
-    ));
+    try {
+      const success = await updateInvestorConnection(connectionId, {
+        status: action === 'accept' ? 'accepted' : 'rejected',
+        responseMessage: message,
+        updatedAt: new Date()
+      });
+
+      if (success && action === 'accept') {
+        // Create chat conversation when connection is accepted
+        const connection = connections.find(c => c.id === connectionId);
+        if (connection) {
+          await createChatFromConnection(connection);
+        }
+      }
+    } catch (error) {
+      console.error(`Error ${action}ing connection:`, error);
+    }
   };
 
   const handleStartChat = (connection: InvestorConnection) => {
@@ -171,6 +170,19 @@ const InvestorDashboard: React.FC = () => {
                 <div className="flex items-center">
                   <Star className="w-4 h-4 mr-1" />
                   {user?.focus?.join(', ')}
+                </div>
+                <div className="flex items-center">
+                  {user?.activelyInvesting ? (
+                    <div className="flex items-center px-3 py-1 bg-green-500/20 rounded-full">
+                      <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
+                      <span className="text-sm">Actively Investing</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center px-3 py-1 bg-gray-500/20 rounded-full">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full mr-2"></div>
+                      <span className="text-sm">Not Currently Investing</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

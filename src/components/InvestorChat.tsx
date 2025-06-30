@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { ChatConversation, ChatMessageInvestor, InvestorConnection } from '../types';
+import { subscribeToChatConversations, subscribeToInvestorChatMessages, addInvestorChatMessage } from '../services/firestore';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const InvestorChat: React.FC = () => {
@@ -39,12 +40,31 @@ const InvestorChat: React.FC = () => {
   const connectionFromState: InvestorConnection | undefined = location.state?.connection;
 
   useEffect(() => {
-    loadConversations();
-  }, [user]);
+    if (user) {
+      const unsubscribe = subscribeToChatConversations(user.uid, (conversationList) => {
+        setConversations(conversationList);
+        setLoading(false);
+        
+        // Auto-select conversation if coming from investor dashboard
+        if (connectionFromState && conversationList.length > 0) {
+          const matchingConv = conversationList.find(conv => conv.projectId === connectionFromState.projectId);
+          if (matchingConv) {
+            setSelectedConversation(matchingConv);
+          }
+        }
+      });
+
+      return () => unsubscribe();
+    }
+  }, [user, connectionFromState]);
 
   useEffect(() => {
     if (selectedConversation) {
-      loadMessages(selectedConversation.id);
+      const unsubscribe = subscribeToInvestorChatMessages(selectedConversation.id, (messageList) => {
+        setMessages(messageList);
+      });
+
+      return () => unsubscribe();
     }
   }, [selectedConversation]);
 
@@ -52,149 +72,14 @@ const InvestorChat: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
-  const loadConversations = async () => {
-    if (!user) return;
-    
-    setLoading(true);
-    try {
-      // In a real implementation, this would fetch conversations from Firestore
-      // For now, we'll create mock conversations
-      const mockConversations: ChatConversation[] = [
-        {
-          id: '1',
-          participants: [user.uid, 'developer1'],
-          participantDetails: {
-            [user.uid]: {
-              name: user.name,
-              role: user.role,
-            },
-            'developer1': {
-              name: 'Alex Johnson',
-              role: 'developer',
-            }
-          },
-          projectId: 'project1',
-          lastMessage: {
-            id: 'msg1',
-            conversationId: '1',
-            senderId: 'developer1',
-            content: 'Thanks for accepting my project! I\'m excited to discuss the funding details.',
-            timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
-            type: 'text',
-            isRead: false
-          },
-          lastActivity: new Date(Date.now() - 1000 * 60 * 30),
-          isActive: true
-        },
-        {
-          id: '2',
-          participants: [user.uid, 'developer2'],
-          participantDetails: {
-            [user.uid]: {
-              name: user.name,
-              role: user.role,
-            },
-            'developer2': {
-              name: 'Sarah Chen',
-              role: 'developer',
-            }
-          },
-          projectId: 'project2',
-          lastMessage: {
-            id: 'msg2',
-            conversationId: '2',
-            senderId: user.uid,
-            content: 'I\'ve reviewed your MVP documentation. Let\'s schedule a call to discuss next steps.',
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-            type: 'text',
-            isRead: true
-          },
-          lastActivity: new Date(Date.now() - 1000 * 60 * 60 * 2),
-          isActive: true
-        }
-      ];
-      
-      setConversations(mockConversations);
-      
-      // If coming from investor dashboard with a specific connection, create/select that conversation
-      if (connectionFromState && !selectedConversation) {
-        const existingConv = mockConversations.find(conv => conv.projectId === connectionFromState.projectId);
-        if (existingConv) {
-          setSelectedConversation(existingConv);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading conversations:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMessages = async (conversationId: string) => {
-    try {
-      // In a real implementation, this would fetch messages from Firestore
-      const mockMessages: ChatMessageInvestor[] = [
-        {
-          id: '1',
-          conversationId,
-          senderId: 'developer1',
-          content: 'Hi! Thank you so much for accepting my project connection request. I\'m really excited about the possibility of working together.',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
-          type: 'text',
-          isRead: true
-        },
-        {
-          id: '2',
-          conversationId,
-          senderId: user?.uid || '',
-          content: 'Hello Alex! I was impressed by your AI Content Creator project. The use of LangChain and your approach to the MVP looks very promising. I\'d love to learn more about your vision and roadmap.',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 23), // 23 hours ago
-          type: 'text',
-          isRead: true
-        },
-        {
-          id: '3',
-          conversationId,
-          senderId: 'developer1',
-          content: 'That\'s fantastic to hear! I\'ve been working on this for the past 3 months and we\'re at 65% completion. The market validation has been really positive - we\'ve had 50+ beta users testing the platform.',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 22), // 22 hours ago
-          type: 'text',
-          isRead: true
-        },
-        {
-          id: '4',
-          conversationId,
-          senderId: 'developer1',
-          content: 'I\'ve attached our latest MVP documentation and financial projections. Would you be available for a call this week to discuss the investment details?',
-          timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
-          type: 'text',
-          attachments: [
-            {
-              name: 'MVP_Documentation_v2.pdf',
-              url: '#',
-              type: 'pdf'
-            },
-            {
-              name: 'Financial_Projections_2024.xlsx',
-              url: '#',
-              type: 'excel'
-            }
-          ],
-          isRead: false
-        }
-      ];
-      
-      setMessages(mockMessages);
-    } catch (error) {
-      console.error('Error loading messages:', error);
-    }
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation || !user) return;
 
-    const message: ChatMessageInvestor = {
-      id: Date.now().toString(),
+    const message: Omit<ChatMessageInvestor, 'id'> = {
       conversationId: selectedConversation.id,
       senderId: user.uid,
       content: newMessage,
@@ -203,21 +88,13 @@ const InvestorChat: React.FC = () => {
       isRead: true
     };
 
-    setMessages(prev => [...prev, message]);
     setNewMessage('');
 
-    // Update conversation's last message
-    setConversations(prev => prev.map(conv => 
-      conv.id === selectedConversation.id 
-        ? { ...conv, lastMessage: message, lastActivity: new Date() }
-        : conv
-    ));
-
-    // In a real implementation, this would save to Firestore
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    try {
+      await addInvestorChatMessage(message);
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
   };
 
   const formatTime = (date: Date) => {
@@ -317,13 +194,13 @@ const InvestorChat: React.FC = () => {
                           {otherParticipant?.name}
                         </h3>
                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatTime(conversation.lastActivity)}
+                          {conversation.lastMessage ? formatTime(conversation.lastActivity) : ''}
                         </span>
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                        {conversation.lastMessage?.content}
+                        {conversation.lastMessage?.content || 'No messages yet'}
                       </p>
-                      {!conversation.lastMessage?.isRead && conversation.lastMessage?.senderId !== user?.uid && (
+                      {conversation.lastMessage && !conversation.lastMessage.isRead && conversation.lastMessage.senderId !== user?.uid && (
                         <div className="w-2 h-2 bg-primary-500 rounded-full mt-1"></div>
                       )}
                     </div>
@@ -331,6 +208,15 @@ const InvestorChat: React.FC = () => {
                 </motion.div>
               );
             })}
+            
+            {filteredConversations.length === 0 && (
+              <div className="p-8 text-center">
+                <MessageCircle className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600 dark:text-gray-400 text-sm">
+                  No conversations yet. Accept connection requests to start chatting with developers.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

@@ -10,7 +10,9 @@ import {
   where, 
   orderBy, 
   limit,
-  Timestamp 
+  Timestamp,
+  onSnapshot,
+  Unsubscribe
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Technology, Project, Investor, ChatMessage, MVPDocument, InvestorConnection, ChatConversation, ChatMessageInvestor } from '../types';
@@ -142,33 +144,85 @@ export const updateMVPDocument = async (docId: string, updates: Partial<MVPDocum
   }
 };
 
-// Investor Services
-export const getInvestors = async (filters?: {
-  stage?: string;
-  focus?: string;
-  limit?: number;
-}): Promise<Investor[]> => {
+// Real-time Investor Services
+export const subscribeToInvestors = (
+  callback: (investors: Investor[]) => void,
+  filters?: {
+    stage?: string;
+    focus?: string;
+    activelyInvesting?: boolean;
+    limit?: number;
+  }
+): Unsubscribe => {
   try {
-    let q = query(collection(db, 'investors'), orderBy('matchScore', 'desc'));
+    let q = query(
+      collection(db, 'users'),
+      where('role', '==', 'investor'),
+      orderBy('createdAt', 'desc')
+    );
     
     if (filters?.stage && filters.stage !== 'All') {
       q = query(q, where('stage', '==', filters.stage));
+    }
+    
+    if (filters?.activelyInvesting !== undefined) {
+      q = query(q, where('activelyInvesting', '==', filters.activelyInvesting));
     }
     
     if (filters?.limit) {
       q = query(q, limit(filters.limit));
     }
     
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate()
-    })) as Investor[];
+    return onSnapshot(q, (querySnapshot) => {
+      const investors: Investor[] = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          name: data.name,
+          firm: data.firm || '',
+          focus: data.focus || [],
+          stage: data.stage || 'Pre-seed',
+          checkSize: data.checkSize || '',
+          portfolio: data.portfolio || [],
+          location: data.location || '',
+          website: data.website || '',
+          activelyInvesting: data.activelyInvesting || false,
+          matchScore: calculateMatchScore(data), // Calculate based on user data
+          createdAt: data.createdAt?.toDate()
+        };
+      });
+      callback(investors);
+    });
   } catch (error) {
-    console.error('Error fetching investors:', error);
-    return [];
+    console.error('Error subscribing to investors:', error);
+    return () => {}; // Return empty unsubscribe function
   }
+};
+
+// Helper function to calculate match score
+const calculateMatchScore = (investorData: any): number => {
+  // Simple scoring algorithm - can be enhanced
+  let score = 50; // Base score
+  
+  if (investorData.activelyInvesting) score += 30;
+  if (investorData.portfolio && investorData.portfolio.length > 0) score += 20;
+  if (investorData.focus && investorData.focus.length > 0) score += 10;
+  
+  return Math.min(score, 100);
+};
+
+// Legacy function for backward compatibility
+export const getInvestors = async (filters?: {
+  stage?: string;
+  focus?: string;
+  limit?: number;
+}): Promise<Investor[]> => {
+  return new Promise((resolve) => {
+    const unsubscribe = subscribeToInvestors((investors) => {
+      unsubscribe();
+      resolve(investors);
+    }, filters);
+  });
 };
 
 // Investor Connection Services
@@ -186,25 +240,39 @@ export const addInvestorConnection = async (connection: Omit<InvestorConnection,
   }
 };
 
-export const getInvestorConnections = async (userId: string): Promise<InvestorConnection[]> => {
+export const subscribeToInvestorConnections = (
+  userId: string,
+  callback: (connections: InvestorConnection[]) => void
+): Unsubscribe => {
   try {
     const q = query(
       collection(db, 'investorConnections'),
-      where('userId', '==', userId),
+      where('investorId', '==', userId),
       orderBy('createdAt', 'desc')
     );
     
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate(),
-      updatedAt: doc.data().updatedAt?.toDate()
-    })) as InvestorConnection[];
+    return onSnapshot(q, (querySnapshot) => {
+      const connections: InvestorConnection[] = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate(),
+        updatedAt: doc.data().updatedAt?.toDate()
+      })) as InvestorConnection[];
+      callback(connections);
+    });
   } catch (error) {
-    console.error('Error fetching investor connections:', error);
-    return [];
+    console.error('Error subscribing to investor connections:', error);
+    return () => {};
   }
+};
+
+export const getInvestorConnections = async (userId: string): Promise<InvestorConnection[]> => {
+  return new Promise((resolve) => {
+    const unsubscribe = subscribeToInvestorConnections(userId, (connections) => {
+      unsubscribe();
+      resolve(connections);
+    });
+  });
 };
 
 export const updateInvestorConnection = async (connectionId: string, updates: Partial<InvestorConnection>): Promise<boolean> => {
@@ -220,7 +288,147 @@ export const updateInvestorConnection = async (connectionId: string, updates: Pa
   }
 };
 
-// Chat Services
+// Real-time Chat Services
+export const subscribeToChatConversations = (
+  userId: string,
+  callback: (conversations: ChatConversation[]) => void
+): Unsubscribe => {
+  try {
+    const q = query(
+      collection(db, 'chatConversations'),
+      where('participants', 'array-contains', userId),
+      orderBy('lastActivity', 'desc')
+    );
+    
+    return onSnapshot(q, (querySnapshot) => {
+      const conversations: ChatConversation[] = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        lastActivity: doc.data().lastActivity?.toDate()
+      })) as ChatConversation[];
+      callback(conversations);
+    });
+  } catch (error) {
+    console.error('Error subscribing to chat conversations:', error);
+    return () => {};
+  }
+};
+
+export const subscribeToInvestorChatMessages = (
+  conversationId: string,
+  callback: (messages: ChatMessageInvestor[]) => void
+): Unsubscribe => {
+  try {
+    const q = query(
+      collection(db, 'investorChatMessages'),
+      where('conversationId', '==', conversationId),
+      orderBy('timestamp', 'asc')
+    );
+    
+    return onSnapshot(q, (querySnapshot) => {
+      const messages: ChatMessageInvestor[] = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate()
+      })) as ChatMessageInvestor[];
+      callback(messages);
+    });
+  } catch (error) {
+    console.error('Error subscribing to investor chat messages:', error);
+    return () => {};
+  }
+};
+
+export const addChatConversation = async (conversation: Omit<ChatConversation, 'id'>): Promise<string | null> => {
+  try {
+    const docRef = await addDoc(collection(db, 'chatConversations'), {
+      ...conversation,
+      lastActivity: Timestamp.now()
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error adding chat conversation:', error);
+    return null;
+  }
+};
+
+export const addInvestorChatMessage = async (message: Omit<ChatMessageInvestor, 'id'>): Promise<string | null> => {
+  try {
+    const docRef = await addDoc(collection(db, 'investorChatMessages'), {
+      ...message,
+      timestamp: Timestamp.now()
+    });
+    
+    // Update conversation's last activity
+    await updateDoc(doc(db, 'chatConversations', message.conversationId), {
+      lastActivity: Timestamp.now(),
+      lastMessage: {
+        ...message,
+        id: docRef.id,
+        timestamp: new Date()
+      }
+    });
+    
+    return docRef.id;
+  } catch (error) {
+    console.error('Error adding investor chat message:', error);
+    return null;
+  }
+};
+
+// Auto-create chat conversation when connection is accepted
+export const createChatFromConnection = async (connection: InvestorConnection): Promise<string | null> => {
+  try {
+    // Get user details for both participants
+    const developerDoc = await getDoc(doc(db, 'users', connection.userId));
+    const investorDoc = await getDoc(doc(db, 'users', connection.investorId));
+    
+    if (!developerDoc.exists() || !investorDoc.exists()) {
+      throw new Error('User documents not found');
+    }
+    
+    const developerData = developerDoc.data();
+    const investorData = investorDoc.data();
+    
+    const conversation: Omit<ChatConversation, 'id'> = {
+      participants: [connection.userId, connection.investorId],
+      participantDetails: {
+        [connection.userId]: {
+          name: developerData.name,
+          role: 'developer'
+        },
+        [connection.investorId]: {
+          name: investorData.name,
+          role: 'investor'
+        }
+      },
+      projectId: connection.projectId,
+      lastActivity: new Date(),
+      isActive: true
+    };
+    
+    const conversationId = await addChatConversation(conversation);
+    
+    if (conversationId) {
+      // Add initial message
+      await addInvestorChatMessage({
+        conversationId,
+        senderId: connection.investorId,
+        content: `Hi! I've accepted your connection request for "${connection.projectData.title}". I'm excited to learn more about your project and discuss potential collaboration opportunities.`,
+        timestamp: new Date(),
+        type: 'text',
+        isRead: false
+      });
+    }
+    
+    return conversationId;
+  } catch (error) {
+    console.error('Error creating chat from connection:', error);
+    return null;
+  }
+};
+
+// Legacy chat functions for backward compatibility
 export const getChatMessages = async (userId: string, projectId?: string): Promise<ChatMessage[]> => {
   try {
     let q = query(
@@ -235,7 +443,6 @@ export const getChatMessages = async (userId: string, projectId?: string): Promi
         where('userId', '==', userId),
         where('projectId', '==', projectId),
         orderBy('timestamp', 'asc')
-      
       );
     }
     
@@ -264,74 +471,7 @@ export const addChatMessage = async (message: Omit<ChatMessage, 'id'>): Promise<
   }
 };
 
-// Investor Chat Services
-export const getChatConversations = async (userId: string): Promise<ChatConversation[]> => {
-  try {
-    const q = query(
-      collection(db, 'chatConversations'),
-      where('participants', 'array-contains', userId),
-      orderBy('lastActivity', 'desc')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      lastActivity: doc.data().lastActivity?.toDate()
-    })) as ChatConversation[];
-  } catch (error) {
-    console.error('Error fetching chat conversations:', error);
-    return [];
-  }
-};
-
-export const addChatConversation = async (conversation: Omit<ChatConversation, 'id'>): Promise<string | null> => {
-  try {
-    const docRef = await addDoc(collection(db, 'chatConversations'), {
-      ...conversation,
-      lastActivity: Timestamp.now()
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error adding chat conversation:', error);
-    return null;
-  }
-};
-
-export const getInvestorChatMessages = async (conversationId: string): Promise<ChatMessageInvestor[]> => {
-  try {
-    const q = query(
-      collection(db, 'investorChatMessages'),
-      where('conversationId', '==', conversationId),
-      orderBy('timestamp', 'asc')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      timestamp: doc.data().timestamp?.toDate()
-    })) as ChatMessageInvestor[];
-  } catch (error) {
-    console.error('Error fetching investor chat messages:', error);
-    return [];
-  }
-};
-
-export const addInvestorChatMessage = async (message: Omit<ChatMessageInvestor, 'id'>): Promise<string | null> => {
-  try {
-    const docRef = await addDoc(collection(db, 'investorChatMessages'), {
-      ...message,
-      timestamp: Timestamp.now()
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error adding investor chat message:', error);
-    return null;
-  }
-};
-
-// Initialize sample data
+// Initialize sample data (removed investor data)
 export const initializeSampleData = async (): Promise<void> => {
   try {
     // Check if sample data already exists
@@ -340,7 +480,7 @@ export const initializeSampleData = async (): Promise<void> => {
       return; // Sample data already exists
     }
 
-    // Add sample technologies
+    // Add sample technologies only
     const sampleTechnologies: Omit<Technology, 'id'>[] = [
       {
         title: 'LangChain 0.3.0',
@@ -424,51 +564,7 @@ export const initializeSampleData = async (): Promise<void> => {
       await addTechnology(tech);
     }
 
-    // Add sample investors
-    const sampleInvestors: Omit<Investor, 'id'>[] = [
-      {
-        name: 'Sarah Chen',
-        firm: 'AI Ventures',
-        focus: ['AI/ML', 'Enterprise Software', 'Developer Tools'],
-        stage: 'Seed',
-        checkSize: '$500K - $2M',
-        portfolio: ['OpenAI', 'Anthropic', 'Scale AI'],
-        location: 'San Francisco, CA',
-        website: 'https://aiventures.com',
-        matchScore: 95
-      },
-      {
-        name: 'Michael Rodriguez',
-        firm: 'Tech Forward Capital',
-        focus: ['Web3', 'Fintech', 'Infrastructure'],
-        stage: 'Pre-seed',
-        checkSize: '$100K - $500K',
-        portfolio: ['Chainlink', 'Polygon', 'Uniswap'],
-        location: 'New York, NY',
-        website: 'https://techforward.vc',
-        matchScore: 88
-      },
-      {
-        name: 'Emily Watson',
-        firm: 'Growth Labs',
-        focus: ['Mobile', 'Consumer Apps', 'Social'],
-        stage: 'Series A',
-        checkSize: '$2M - $10M',
-        portfolio: ['Instagram', 'TikTok', 'Discord'],
-        location: 'Los Angeles, CA',
-        website: 'https://growthlabs.com',
-        matchScore: 82
-      }
-    ];
-
-    for (const investor of sampleInvestors) {
-      await addDoc(collection(db, 'investors'), {
-        ...investor,
-        createdAt: Timestamp.now()
-      });
-    }
-
-    console.log('Sample data initialized successfully');
+    console.log('Sample technologies initialized successfully');
   } catch (error) {
     console.error('Error initializing sample data:', error);
   }
